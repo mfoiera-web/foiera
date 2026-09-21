@@ -1,0 +1,122 @@
+name: Build and Deploy Foiera
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Get repository
+        uses: actions/checkout@v6
+
+      - name: Generate gallery.json
+        run: |
+          node <<'EOF'
+          const fs = require("fs");
+          const path = require("path");
+
+          const imageDir = "images";
+
+          const extensions = [
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp",
+            ".gif"
+          ];
+
+          const files = fs.readdirSync(imageDir);
+
+          const gallery = files
+            .filter(file => {
+              const ext = path.extname(file).toLowerCase();
+              return extensions.includes(ext);
+            })
+            .map(file => {
+
+              const filename = path.basename(
+                file,
+                path.extname(file)
+              );
+
+              const separator = filename.lastIndexOf("__");
+
+              if (separator === -1) {
+                console.log(
+                  `Skipping invalid filename: ${file}`
+                );
+                return null;
+              }
+
+              const title = filename
+                .substring(0, separator)
+                .trim();
+
+              const date = filename
+                .substring(separator + 2)
+                .trim();
+
+              if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+                console.log(
+                  `Skipping invalid date: ${file}`
+                );
+                return null;
+              }
+
+              return {
+                image: `images/${encodeURIComponent(file).replace(/%2F/g, "/")}`,
+                title: title,
+                date: date
+              };
+            })
+            .filter(Boolean);
+
+          gallery.sort((a, b) => {
+            return b.date.localeCompare(a.date);
+          });
+
+          fs.writeFileSync(
+            "gallery.json",
+            JSON.stringify(gallery, null, 2)
+          );
+
+          console.log(
+            `Generated gallery.json with ${gallery.length} images.`
+          );
+          EOF
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload website
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: "."
+
+  deploy:
+    runs-on: ubuntu-latest
+
+    needs: build
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
